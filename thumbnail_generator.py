@@ -54,6 +54,22 @@ class ThumbnailGenerator:
         self.root.configure(bg=COLORS['bg'])
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         
+        # 確定程式執行的路徑（相容 PyInstaller 打包）
+        if getattr(sys, 'frozen', False):
+            self.base_dir = os.path.dirname(sys.executable)
+            self.res_dir = getattr(sys, '_MEIPASS', self.base_dir)
+        else:
+            self.base_dir = os.path.dirname(os.path.abspath(__file__))
+            self.res_dir = self.base_dir
+            
+        # 設定視窗圖示
+        ico_path = os.path.join(self.res_dir, "app_icon.ico")
+        if os.path.exists(ico_path):
+            try:
+                self.root.iconbitmap(ico_path)
+            except:
+                pass
+                
         self.selected_folders = []
         self.video_files = []
         self.output_mode = tk.StringVar(value='same_folder')
@@ -71,18 +87,12 @@ class ThumbnailGenerator:
         self.capture_time = tk.StringVar(value='')  # 空值 = 使用中間幀
         self.overwrite_mode = tk.BooleanVar(value=False)  # 覆蓋模式
         
-        # 確定程式執行的路徑（相容 PyInstaller 打包）
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            
         # 處理記錄（避免重複跳過檢查）
-        self.history_file = os.path.join(base_dir, 'processed_videos.json')
+        self.history_file = os.path.join(self.base_dir, 'processed_videos.json')
         self.processed_videos = self._load_history()
         
         # 設定檔
-        self.settings_file = os.path.join(base_dir, 'settings.json')
+        self.settings_file = os.path.join(self.base_dir, 'settings.json')
         
         # 控制狀態
         self.is_processing = False
