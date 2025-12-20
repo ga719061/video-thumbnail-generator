@@ -52,6 +52,7 @@ class ThumbnailGenerator:
         self.root.geometry("750x1000")
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS['bg'])
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         
         self.selected_folders = []
         self.video_files = []
@@ -151,6 +152,16 @@ class ThumbnailGenerator:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
         except:
             pass
+            
+    def _save_settings_manual(self):
+        """手動儲存按鈕點擊事件"""
+        self._save_settings()
+        messagebox.showinfo("成功", "設定已儲存！")
+        
+    def _on_closing(self):
+        """當視窗關閉時自動儲存"""
+        self._save_settings()
+        self.root.destroy()
     
     def _setup_styles(self):
         style = ttk.Style()
@@ -312,11 +323,21 @@ class ThumbnailGenerator:
         tk.Label(hint_frame, text="💡 範例: 若 Y: 槽對應 NAS 的「God」資料夾", bg=COLORS['card'], fg=COLORS['text_dim'], font=('Segoe UI', 9)).pack(anchor='w')
         tk.Label(hint_frame, text="     → 磁碟機填 Y，共享資料夾填 God", bg=COLORS['card'], fg=COLORS['success'], font=('Segoe UI', 9)).pack(anchor='w')
         
-        # 測試連線按鈕
-        test_btn = tk.Button(self.ssh_frame, text="🔍 測試連線 (列出共享資料夾)", 
+        # 測試連線與儲存按鈕區
+        ssh_btn_frame = tk.Frame(self.ssh_frame, bg=COLORS['card'])
+        ssh_btn_frame.grid(row=8, column=0, columnspan=4, pady=(15,0))
+        
+        test_btn = tk.Button(ssh_btn_frame, text="🔍 測試連線 (列出共享資料夾)", 
                              bg=COLORS['accent'], fg='white', font=('Segoe UI', 9),
-                             command=self._test_ssh_connection, cursor='hand2')
-        test_btn.grid(row=8, column=0, columnspan=4, pady=(12,0))
+                             command=self._test_ssh_connection, cursor='hand2',
+                             padx=10, pady=3)
+        test_btn.pack(side=tk.LEFT, padx=5)
+        
+        save_settings_btn = tk.Button(ssh_btn_frame, text="💾 儲存設定", 
+                                     bg=COLORS['success'], fg='white', font=('Segoe UI', 9),
+                                     command=self._save_settings_manual, cursor='hand2',
+                                     padx=15, pady=3)
+        save_settings_btn.pack(side=tk.LEFT, padx=5)
         
         # 按鈕區
         btn_frame = ttk.Frame(main_frame, style='Main.TFrame')
