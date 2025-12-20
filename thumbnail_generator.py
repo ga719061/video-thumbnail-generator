@@ -49,9 +49,8 @@ class ThumbnailGenerator:
     def __init__(self, root):
         self.root = root
         self.root.title("🎬 影片縮圖產生器")
-        self.root.geometry("750x850")
-        self.root.resizable(True, True)
-        self.root.minsize(700, 700)
+        self.root.geometry("750x920")
+        self.root.resizable(False, False)
         self.root.configure(bg=COLORS['bg'])
         
         self.selected_folders = []
@@ -75,6 +74,9 @@ class ThumbnailGenerator:
         self.history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_videos.json')
         self.processed_videos = self._load_history()
         
+        # 設定檔
+        self.settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
+        
         # 控制狀態
         self.is_processing = False
         self.is_paused = False
@@ -87,6 +89,7 @@ class ThumbnailGenerator:
         
         self._setup_styles()
         self._setup_ui()
+        self._load_settings()  # 載入上次的設定
     
     def _load_history(self):
         """載入已處理影片記錄"""
@@ -105,6 +108,49 @@ class ThumbnailGenerator:
                 json.dump(list(self.processed_videos), f, ensure_ascii=False)
         except Exception as e:
             self._log(f"儲存記錄失敗: {e}", 'warning')
+    
+    def _load_settings(self):
+        """載入上次的設定"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    self.ssh_host.set(settings.get('ssh_host', ''))
+                    self.ssh_port.set(settings.get('ssh_port', '22'))
+                    self.ssh_user.set(settings.get('ssh_user', ''))
+                    self.drive_letter.set(settings.get('drive_letter', ''))
+                    self.share_folder_name.set(settings.get('share_folder', ''))
+                    self.volume_number.set(settings.get('volume_number', '1'))
+                    self.capture_time.set(settings.get('capture_time', ''))
+                    # 載入選擇的資料夾
+                    folders = settings.get('folders', [])
+                    for folder in folders:
+                        if os.path.exists(folder) and folder not in self.selected_folders:
+                            self.selected_folders.append(folder)
+                            display_path = folder if len(folder) < 70 else f"...{folder[-67:]}"
+                            self.folder_listbox.insert(tk.END, f"  📁 {display_path}")
+                    if folders:
+                        self._scan_videos()
+        except:
+            pass
+    
+    def _save_settings(self):
+        """儲存當前設定"""
+        try:
+            settings = {
+                'ssh_host': self.ssh_host.get(),
+                'ssh_port': self.ssh_port.get(),
+                'ssh_user': self.ssh_user.get(),
+                'drive_letter': self.drive_letter.get(),
+                'share_folder': self.share_folder_name.get(),
+                'volume_number': self.volume_number.get(),
+                'capture_time': self.capture_time.get(),
+                'folders': self.selected_folders
+            }
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except:
+            pass
     
     def _setup_styles(self):
         style = ttk.Style()
@@ -325,6 +371,9 @@ class ThumbnailGenerator:
                                      style='Start.TButton', command=self._start_processing)
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
+        self.clear_thumbnails_btn = ttk.Button(self.control_frame, text="🧹 清除縮圖", 
+                                              style='Secondary.TButton', command=self._clear_thumbnails_clicked)
+        
         self.pause_btn = ttk.Button(self.control_frame, text="⏸️ 暫停", 
                                      style='Pause.TButton', command=self._toggle_pause)
         
@@ -442,6 +491,7 @@ class ThumbnailGenerator:
             if not self.is_processing:
                 self.control_frame.pack(pady=8)
                 self.start_btn.pack(side=tk.LEFT, padx=5)
+                self.clear_thumbnails_btn.pack(side=tk.LEFT, padx=5)
                 self.pause_btn.pack_forget()
                 self.stop_btn.pack_forget()
         else:
@@ -573,16 +623,16 @@ class ThumbnailGenerator:
         while remote_path and remote_path != '/':
             try:
                 self.sftp_client.stat(remote_path)
-                break
-            except FileNotFoundError:
+                break  # 目錄存在
+            except IOError:
                 dirs.append(remote_path)
                 remote_path = os.path.dirname(remote_path).replace('\\', '/')
         
         for d in reversed(dirs):
             try:
                 self.sftp_client.mkdir(d)
-            except:
-                pass
+            except IOError:
+                pass  # 目錄可能已存在或無權限
     
     def _start_processing(self):
         if self.output_mode.get() == 'synology_ssh':
@@ -617,6 +667,107 @@ class ThumbnailGenerator:
         
         thread = threading.Thread(target=self._process_videos, args=(current_mode,), daemon=True)
         thread.start()
+
+    def _clear_thumbnails_clicked(self):
+        if not self.selected_folders:
+            messagebox.showwarning("警告", "請先新增資料夾！")
+            return
+            
+        if not messagebox.askyesno("確認", "確定要清除選取資料夾中的所有縮圖嗎？\n這將會刪除已產生的縮圖檔案。"):
+            return
+            
+        current_mode = self.output_mode.get()
+        if current_mode == 'synology_ssh':
+            try:
+                self._connect_ssh()
+            except Exception as e:
+                messagebox.showerror("錯誤", f"SSH 連線失敗: {str(e)}")
+                return
+        
+        self.is_processing = True
+        self.stop_flag = False
+        
+        # UI 狀態調整
+        self.add_folder_btn.config(state=tk.DISABLED)
+        self.remove_folder_btn.config(state=tk.DISABLED)
+        self.clear_btn.config(state=tk.DISABLED)
+        self.start_btn.pack_forget()
+        self.clear_thumbnails_btn.pack_forget()
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+        self.progress_frame.pack(pady=8)
+        
+        self.log_text.delete(1.0, tk.END)
+        self._log(f"🧹 開始清除縮圖...", 'warning')
+        
+        thread = threading.Thread(target=self._process_clear_thumbnails, args=(current_mode,), daemon=True)
+        thread.start()
+
+    def _process_clear_thumbnails(self, output_mode):
+        total = len(self.video_files)
+        success_count = 0
+        
+        for i, video_path in enumerate(self.video_files):
+            if self.stop_flag: break
+            
+            filename = os.path.basename(video_path)
+            video_dir = os.path.dirname(video_path)
+            video_name = os.path.splitext(filename)[0]
+            
+            try:
+                if output_mode == 'synology_ssh':
+                    nas_video_dir = self._local_to_nas_path(video_dir)
+                    eadir_path = f"{nas_video_dir}/@eaDir/{filename}"
+                    
+                    # 刪除影片子資料夾
+                    try:
+                        # 先刪除資料夾內的所有檔案
+                        items = self.sftp_client.listdir(eadir_path)
+                        for item in items:
+                            self.sftp_client.remove(f"{eadir_path}/{item}")
+                        self.sftp_client.rmdir(eadir_path)
+                        success_count += 1
+                        self._log(f"🗑️ 已清除: {filename}", 'info')
+                    except IOError:
+                        pass # 可能不存在 @eaDir 子資料夾
+                else:
+                    # 本機模式
+                    thumbnail_path = os.path.normpath(os.path.join(video_dir, f"{video_name}.jpg"))
+                    if os.path.exists(thumbnail_path):
+                        os.remove(thumbnail_path)
+                        success_count += 1
+                        self._log(f"🗑️ 已清除: {filename}", 'info')
+                
+                # 從歷史記錄移除
+                if video_path in self.processed_videos:
+                    self.processed_videos.discard(video_path)
+            except Exception as e:
+                self._log(f"激 清除失敗 {filename}: {str(e)}", 'error')
+                
+            progress = ((i + 1) / total) * 100
+            self.root.after(0, self._update_progress, progress, i + 1, total)
+
+        # 儲存清空後的歷史記錄
+        self._save_history()
+        
+        if output_mode == 'synology_ssh':
+            self._disconnect_ssh()
+            
+        self.root.after(0, lambda: self._on_complete_clear(success_count))
+
+    def _on_complete_clear(self, count):
+        self.is_processing = False
+        self.progress_label.config(text=f"✨ 清除完成！共移除 {count} 個項目的縮圖")
+        self._log(f"✨ 清除完成！共移除 {count} 個項目的縮圖", 'success')
+        self._update_ui_state()
+        self._scan_folders()
+
+    def _update_ui_state(self):
+        self.add_folder_btn.config(state=tk.NORMAL)
+        self.remove_folder_btn.config(state=tk.NORMAL)
+        self.clear_btn.config(state=tk.NORMAL)
+        self.stop_btn.pack_forget()
+        self.pause_btn.pack_forget()
+
     
     def _toggle_pause(self):
         if self.is_paused:
@@ -670,24 +821,30 @@ class ThumbnailGenerator:
                     if overwrite:
                         self._log("🔄 覆蓋模式：開啟", 'warning')
                 
-                # 檢查是否在歷史記錄中（非覆蓋模式下）
-                if not overwrite and video_path in self.processed_videos:
-                    skip_count += 1
-                    self._log(f"⏭️ {filename} (歷史記錄)", 'info')
-                    continue
-                
                 # 檢查縮圖是否已存在（非覆蓋模式下）
-                if not overwrite and self._thumbnail_exists(video_path, output_mode):
-                    skip_count += 1
-                    self._log(f"⏭️ {filename} (已存在)", 'info')
-                    # 加入歷史記錄
-                    self.processed_videos.add(video_path)
-                else:
-                    self._generate_thumbnail(video_path, output_mode)
-                    success_count += 1
-                    self._log(f"✓ {filename}", 'success')
-                    # 加入歷史記錄
-                    self.processed_videos.add(video_path)
+                # 優先檢查歷史記錄（快速），再檢查實際檔案（慢）
+                if not overwrite:
+                    # 如果在歷史記錄中，還要再確認縮圖真的存在
+                    if video_path in self.processed_videos:
+                        if self._thumbnail_exists(video_path, output_mode):
+                            skip_count += 1
+                            self._log(f"⏭️ {filename} (已處理)", 'info')
+                            continue
+                        else:
+                            # 縮圖不存在了，從歷史記錄移除
+                            self.processed_videos.discard(video_path)
+                    elif self._thumbnail_exists(video_path, output_mode):
+                        skip_count += 1
+                        self._log(f"⏭️ {filename} (已存在)", 'info')
+                        self.processed_videos.add(video_path)
+                        continue
+                
+                # 生成縮圖
+                self._generate_thumbnail(video_path, output_mode)
+                success_count += 1
+                self._log(f"✓ {filename}", 'success')
+                # 加入歷史記錄
+                self.processed_videos.add(video_path)
             except Exception as e:
                 fail_count += 1
                 self._log(f"✗ {filename}: {str(e)}", 'error')
@@ -703,6 +860,9 @@ class ThumbnailGenerator:
         self._save_history()
         self._log(f"已儲存處理記錄（共 {len(self.processed_videos)} 筆）", 'info')
         
+        # 儲存設定
+        self._save_settings()
+        
         self.root.after(0, self._on_complete, success_count, fail_count, skip_count, total)
     
     def _thumbnail_exists(self, video_path, output_mode):
@@ -711,12 +871,14 @@ class ThumbnailGenerator:
         video_name = os.path.splitext(video_filename)[0]
         
         if output_mode == 'synology_ssh':
-            nas_video_dir = self._local_to_nas_path(video_dir)
-            thumbnail_path = f"{nas_video_dir}/@eaDir/{video_filename}/SYNOVIDEO_VIDEO_SCREENSHOT.jpg"
+            if not self.sftp_client:
+                return False
             try:
+                nas_video_dir = self._local_to_nas_path(video_dir)
+                thumbnail_path = f"{nas_video_dir}/@eaDir/{video_filename}/SYNOVIDEO_VIDEO_SCREENSHOT.jpg"
                 self.sftp_client.stat(thumbnail_path)
                 return True
-            except FileNotFoundError:
+            except:
                 return False
         else:
             thumbnail_path = os.path.normpath(os.path.join(video_dir, f"{video_name}.jpg"))
@@ -770,14 +932,32 @@ class ThumbnailGenerator:
             eadir_path = f"{nas_video_dir}/@eaDir/{video_filename}"
             thumbnail_path = f"{eadir_path}/SYNOVIDEO_VIDEO_SCREENSHOT.jpg"
             
+            # 建立目錄
             self._sftp_makedirs(eadir_path)
             
-            with self.sftp_client.file(thumbnail_path, 'wb') as f:
-                f.write(encoded.tobytes())
+            # 上傳縮圖 (僅保留 Video Station 版本)
+            try:
+                # 嘗試先刪除避免權限衝突
+                try:
+                    self.sftp_client.remove(thumbnail_path)
+                except:
+                    pass
+                    
+                with self.sftp_client.file(thumbnail_path, 'wb') as f:
+                    f.write(encoded.tobytes())
+                    f.flush()
+                
+                # 驗證寫入
+                stat = self.sftp_client.stat(thumbnail_path)
+                if stat.st_size == 0:
+                    raise Exception("檔案大小為 0")
+            except Exception as e:
+                raise Exception(f"SFTP 寫入失敗 [{thumbnail_path}]: {str(e)}")
         else:
             thumbnail_path = os.path.normpath(os.path.join(video_dir, f"{video_name}.jpg"))
             with open(thumbnail_path, 'wb') as f:
                 f.write(encoded.tobytes())
+
     
     def _update_progress(self, progress, current, total):
         self.progress_var.set(progress)
