@@ -49,7 +49,7 @@ class ThumbnailGenerator:
     def __init__(self, root):
         self.root = root
         self.root.title("🎬 影片縮圖產生器")
-        self.root.geometry("750x920")
+        self.root.geometry("750x1000")
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS['bg'])
         
