@@ -71,12 +71,18 @@ class ThumbnailGenerator:
         self.capture_time = tk.StringVar(value='')  # 空值 = 使用中間幀
         self.overwrite_mode = tk.BooleanVar(value=False)  # 覆蓋模式
         
+        # 確定程式執行的路徑（相容 PyInstaller 打包）
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
         # 處理記錄（避免重複跳過檢查）
-        self.history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_videos.json')
+        self.history_file = os.path.join(base_dir, 'processed_videos.json')
         self.processed_videos = self._load_history()
         
         # 設定檔
-        self.settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
+        self.settings_file = os.path.join(base_dir, 'settings.json')
         
         # 控制狀態
         self.is_processing = False
@@ -224,7 +230,14 @@ class ThumbnailGenerator:
         style.configure('Custom.Horizontal.TProgressbar',
                         background=COLORS['accent'],
                         troughcolor=COLORS['card'],
-                        thickness=18)
+                        thickness=18,
+                        borderwidth=0)
+        # 確保在 clam 主題下能看到進度條
+        style.layout('Custom.Horizontal.TProgressbar', 
+                     [('Horizontal.Progressbar.trough',
+                       {'children': [('Horizontal.Progressbar.pbar',
+                                      {'side': 'left', 'sticky': 'ns'})],
+                        'sticky': 'nswe'})])
         
         style.configure('Mode.TRadiobutton',
                         background=COLORS['bg'],
@@ -670,6 +683,10 @@ class ThumbnailGenerator:
         self.stop_flag = False
         self.pause_event.set()
         
+        # 進度歸零
+        self.progress_var.set(0)
+        self.progress_bar['value'] = 0
+        
         self.add_folder_btn.config(state=tk.DISABLED)
         self.remove_folder_btn.config(state=tk.DISABLED)
         self.clear_btn.config(state=tk.DISABLED)
@@ -707,6 +724,10 @@ class ThumbnailGenerator:
         
         self.is_processing = True
         self.stop_flag = False
+        
+        # 進度歸零
+        self.progress_var.set(0)
+        self.progress_bar['value'] = 0
         
         # UI 狀態調整
         self.add_folder_btn.config(state=tk.DISABLED)
@@ -982,8 +1003,10 @@ class ThumbnailGenerator:
     
     def _update_progress(self, progress, current, total):
         self.progress_var.set(progress)
+        self.progress_bar['value'] = progress  # 直接設置元件值更穩定
         status = "⏸️ 已暫停" if self.is_paused else "⏳ 處理中"
         self.progress_label.config(text=f"{status}... {current}/{total} ({progress:.0f}%)")
+        self.root.update_idletasks()  # 強制 UI 刷新
     
     def _on_complete(self, success_count, fail_count, skip_count, total):
         self.is_processing = False
