@@ -874,33 +874,35 @@ class ThumbnailGenerator:
                         self._log("🔄 覆蓋模式：開啟", 'warning')
                 
                 # 檢查縮圖是否已存在（非覆蓋模式下）
-                # 優先檢查歷史記錄（快速），再檢查實際檔案（慢）
+                should_skip = False
                 if not overwrite:
-                    # 如果在歷史記錄中，還要再確認縮圖真的存在
                     if video_path in self.processed_videos:
                         if self._thumbnail_exists(video_path, output_mode):
+                            should_skip = True
                             skip_count += 1
                             self._log(f"⏭️ {filename} (已處理)", 'info')
-                            continue
                         else:
                             # 縮圖不存在了，從歷史記錄移除
                             self.processed_videos.discard(video_path)
                     elif self._thumbnail_exists(video_path, output_mode):
+                        should_skip = True
                         skip_count += 1
                         self._log(f"⏭️ {filename} (已存在)", 'info')
                         self.processed_videos.add(video_path)
-                        continue
                 
-                # 生成縮圖
-                self._generate_thumbnail(video_path, output_mode)
-                success_count += 1
-                self._log(f"✓ {filename}", 'success')
-                # 加入歷史記錄
-                self.processed_videos.add(video_path)
+                if not should_skip:
+                    # 生成縮圖
+                    self._generate_thumbnail(video_path, output_mode)
+                    success_count += 1
+                    self._log(f"✓ {filename}", 'success')
+                    # 加入歷史記錄
+                    self.processed_videos.add(video_path)
+                    
             except Exception as e:
                 fail_count += 1
                 self._log(f"✗ {filename}: {str(e)}", 'error')
             
+            # 進度更新放在 try-except 外面，確保無論如何都會執行
             progress = ((i + 1) / total) * 100
             self.root.after(0, self._update_progress, progress, i + 1, total)
         
